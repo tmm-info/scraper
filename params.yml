@@ -1,0 +1,7 @@
+all_products_route: '//*[@class="product_img_link pro_img_hover_scale product-list-category-img"]/@href'
+product_name_route: '//div/h1'
+number_of_products: '//*[@id="nb_item_bottom"]/@value'
+product_image_link_route: '//*[@id="bigpic"]/@src'
+product_weight_price_for_loop: '//fieldset//ul/li'
+product_price_route: '//*[@class="radio_label"]'
+product_weight_route: '//*[@class="price_comb"]'
