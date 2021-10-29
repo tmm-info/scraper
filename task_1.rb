@@ -11,8 +11,14 @@ def main
   file_name = gets.chomp
   #page = "https://www.petsonic.com/farmacia-para-gatos/"
   page_qty = get_qty_of_pages(url)
-  all_urls = get_pages_url(page_qty, url)
-  write_to_csv(all_urls,file_name)
+  all_links = get_pages_url(page_qty, url)
+  write_to_csv(all_links,file_name)
+end
+
+def url_to_string(url)
+  page = Curl.get(url)
+  doc = Nokogiri::HTML(page.body_str)
+  doc
 end
 
 class Product
@@ -26,50 +32,44 @@ class Product
 end
 
 def get_qty_of_pages(url)
-  page = Curl.get(url)
-  doc = Nokogiri::HTML(page.body_str)
+  doc = url_to_string(url)
   params = YAML.load_file('params.yml')
   products_qty = doc.xpath(params['number_of_products']).text.to_i
-  if products_qty % 25 == 0
-    page_qty = (products_qty / 25)
-  else
-    page_qty = (products_qty / 25).next
-  end
+  page_qty = (products_qty / 25.0).ceil if products_qty % 25 != 0
   page_qty
 end
 
-def get_pages_url(page_qty, page )
+def get_pages_url(page_number, page )
   params = YAML.load_file('params.yml')
-  all_products_urls = []
+  all_products_links = []
   i = 1
-  (i..page_qty).each do |page_number|
-    if page_number == 1
+  (i..page_number).each do |i|
+    if i == 1
       each_page = Curl.get(page)
     else
-      each_page = Curl.get(page + "?p=" + "#{page_number}")
+      each_page = Curl.get(page + "?p=" + "#{i}")
     end
-    puts "Number of page parsing - " + page_number.to_s
-    page_number += 1
+    puts "Number of page parsing - " + i.to_s
+    i += 1
     current_page = Nokogiri::HTML(each_page.body_str)
     current_page.xpath(params['all_products_route']).each do |products|
-      all_products_urls << products
+      all_products_links << products
     end
   end
-  all_products_urls
+  all_products_links
 end
 
-def write_to_csv( all_products_urls, file_name )
+def write_to_csv( links, file_name )
   params = YAML.load_file('params.yml')
   CSV.open(file_name, "w+") do |column|
     column << ["Name", "Weight", "Price", "Image"]
     threads = []
     puts Time.now
     threads << Thread.new do
-      all_products_urls.each do |url|
+      links.each do |link|
 
-        puts "Чтение страницы - " + url
-        get_link = Curl.get(url)
-        prod_page = Nokogiri::HTML(get_link.body_str)
+        puts "Чтение страницы - " + link
+        prod_page = url_to_string(link)
 
         name = prod_page.xpath(params['product_name_route']).text
         img_link=prod_page.xpath(params['product_image_link_route'])
