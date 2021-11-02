@@ -4,28 +4,29 @@ require 'csv'
 require 'yaml'
 require 'curl'
 
+threads = []
+@params = YAML.load_file('params.yml')
+#page = "https://www.petsonic.com/farmacia-para-gatos/"
 def main
   puts "Введите ссылку: "
   url = gets.chomp
   puts "Введите название файла:"
   file_name = gets.chomp
-  #page = "https://www.petsonic.com/farmacia-para-gatos/"
   page_qty = get_qty_of_pages(url)
-  all_links = get_pages_url(page_qty, url)
-  names_img_links = extract_names_weights(all_links)
-  weight_prices = extract_weight_price(all_links)
-  write_to_csv(file_name, names_img_links, weight_prices)
+  all_links = get_product_links(page_qty, url)
+  ready_table = parse_products(all_links)
+  write_to_csv(file_name, ready_table)
 end
 
 def url_to_string(url)
   page = Curl.get(url)
-  doc = Nokogiri::HTML(page.body_str)
-  doc
+  @doc = Nokogiri::HTML(page.body_str)
+  @doc
 end
 
 class Product
-  attr_accessor :name, :price, :weight, :img_link
-  def initialize(name, price, weight, img_link)
+  attr_accessor :name_weight, :price, :img_link
+  def initialize(name, weight, price, img_link)
     @name = name
     @weight = weight
     @price = price
@@ -35,79 +36,50 @@ end
 
 def get_qty_of_pages(url)
   doc = url_to_string(url)
-  params = YAML.load_file('params.yml')
-  products_qty = doc.xpath(params['number_of_products']).text.to_i
-  page_qty = (products_qty / 25.0).ceil if products_qty % 25 != 0
+  products_qty = doc.xpath(@params['number_of_products']).text.to_i
+  page_qty = (products_qty / 25.0).ceil
   page_qty
 end
 
-def get_pages_url(page_number, page )
-  params = YAML.load_file('params.yml')
+threads << Thread.new{
+def get_product_links(page_number, page)
   all_products_links = []
-  i = 1
-  (i..page_number).each do |i|
-    if i == 1
-      each_page = Curl.get(page)
-    else
-      each_page = Curl.get(page + "?p=" + "#{i}")
-    end
-    puts "Number of page parsing - " + i.to_s
-    i += 1
+  (1..page_number).each do |pagination_index|
+    (pagination_index == 1) ? each_page = Curl.get(page) : each_page = Curl.get(page + "?p=" + "#{pagination_index}")
+    puts "Number of page parsing - " + pagination_index.to_s
     current_page = Nokogiri::HTML(each_page.body_str)
-    current_page.xpath(params['all_products_route']).each do |products|
+    current_page.xpath(@params['all_products_route']).each do |products|
       all_products_links << products
     end
   end
   all_products_links
-end
+end}
 
-def extract_names_weights(all_products_links)
-  params = YAML.load_file('params.yml')
-  names_and_img_links = []
-  threads = []
-  threads << Thread.new do
+threads << Thread.new {
+  def parse_products(all_products_links)
     all_products_links.each do |url|
       puts "Чтение страницы - " + url
-
-      prod_page = url_to_string(url)
-      name = prod_page.xpath(params['product_name_route']).text
-      img_link=prod_page.xpath(params['product_image_link_route'])
-      puts "Идет запись данных в файл"
-      names_and_img_links << [name, img_link]
-      names_and_img_links
-    end
-  end
-  threads.each { |thr| thr.join }
-end
-
-def extract_weight_price(all_products_links)
-  threads = []
-  params = YAML.load_file('params.yml')
-  weight_prices = []
-  threads << Thread.new do
-    all_products_links.each do |url|
-      puts "Чтение страницы - " + url
-      prod_page = url_to_string(url)
-      weight_price = prod_page.xpath(params['product_weight_price_for_loop'])
-      pw=0
-      weight_price.each do |i|
-        puts "Идет запись данных в файл"
-        weight = i.xpath(params['product_price_route'])[pw].text
-        price = i.xpath(params['product_weight_route'])[pw].text
-        pw+=1
-        weight_prices << [weight, price]
-        weight_prices
+      name = @doc.xpath(@params['product_name_route']).text
+      img_link = @doc.xpath(@params['product_image_link_route']).text
+      weight_block = @doc.xpath(@params['product_weight_price_for_loop'])
+      weight_block.each_with_index do | block, index |
+        weight = block.xpath(@params['product_weight_route'])[index].text
+        price = block.xpath(@params['product_price_route'])[index].text
+        product = Product.new(name, weight, price, img_link)
+        ready_table = [ "#{product.name} - #{product.weight}", product.price, product.img_link ]
+        ready_table
       end
     end
-  end
-  threads.each { |thr| thr.join }
-end
+  end}
 
-def write_to_csv( file_name,names_and_img_links, weight_price )
-  CSV.open(file_name, "wb") do |column|
-    column << ["Name", "Weight", "Price", "Image"]
-    column << [names_and_img_links, weight_price]
+threads << Thread.new{
+  def write_to_csv( file_name, ready_table )
+    CSV.open(file_name, "w+") do |csv|
+      csv << ready_table
+      # names_weights.zip(prices,links) { |row| csv << row }
+    end
   end
-end
+}
+threads.each { |thr| thr.join }
 
 main
